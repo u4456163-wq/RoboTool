@@ -1,75 +1,95 @@
-# 🤖 RoboTool – URDF-Native Robotics Kinematics Engine
+# 🤖 RoboTool – URDF-Native Robotics Kinematics Library
 
-A lightweight robotics kinematics engine for URDF-based robot analysis, geometric Jacobians, and iterative inverse kinematics.
+A lightweight robotics kinematics library for URDF-based robot analysis, differential kinematics, and numerical inverse kinematics.
 
-RoboTool focuses on transparent robotics mathematics, lightweight workflows, and direct integration between robot modeling and executable kinematic analysis.
+RoboTool provides a transparent robotics workflow that bridges URDF robot models with executable kinematic analysis while keeping the underlying mathematics explicit and accessible.
 
-> From URDF → Kinematics → Differential Motion → Simulation-Ready Robotics Workflows
+> **From URDF → Forward Kinematics → Jacobians → Adaptive Inverse Kinematics**
 
 ---
 
 # 🚀 Features
 
-## Kinematics
+## URDF Support
 
-* URDF parsing
-* Forward Kinematics (FK)
-* Homogeneous transformation propagation
-* Full kinematic chain computation
-* Support for:
+- URDF parser
+- Native URDF kinematic trees
+- Arbitrary joint-axis support
+- Automatic kinematic chain generation
 
-  * revolute joints
-  * continuous joints
-  * prismatic joints
-  * fixed joints
+Supported joint types:
 
-## Differential Robotics
+- Revolute
+- Continuous
+- Prismatic
+- Fixed
 
-* Geometric Jacobian computation
-* Linear and angular Jacobians
-* Arbitrary joint-axis support from URDF
-* Numerical Jacobian validation using finite differences
-* Workspace differential motion analysis
+---
+
+## Forward Kinematics
+
+- Homogeneous transformation propagation
+- Full kinematic chain computation
+- Arbitrary joint orientations
+- Rodrigues rotation formulation
+- End-effector pose computation
+
+---
+
+## Differential Kinematics
+
+- Geometric Jacobian computation
+- Linear Jacobian
+- Angular Jacobian
+- Numerical Jacobian validation
+- Finite-difference verification
+- Differential workspace analysis
+
+---
 
 ## Inverse Kinematics
 
-* Iterative Inverse Kinematics (IK)
-* Jacobian pseudo-inverse solver
-* Step-size limiting for numerical stability
-* Convergence detection
-* Workspace error minimization
-* Unreachable target handling
+- Iterative numerical IK
+- Adaptive Damped Least Squares (DLS)
+- Position-only IK
+- Orientation-aware IK (position + orientation, full 6-DOF pose error)
+- Adaptive damping using Jacobian conditioning
+- Yoshikawa manipulability analysis
+- Automatic singularity escape
+- Adaptive step-size limiting
+- Convergence detection
+- Stall detection
+- Workspace validation
+- Unreachable target detection
 
-## CLI Tooling
+---
 
-* Lightweight command-line interface
-* FK inspection
-* Jacobian inspection
-* Numerical validation outputs
-* Target-based IK solving
+## CLI Utilities
+
+- Forward Kinematics inspection
+- Jacobian computation
+- Numerical Jacobian validation
+- Target-based IK solving (position, with optional orientation target)
+
+> **Note:** the CLI is a thin diagnostic wrapper around the library. [RobotCAD](https://github.com/drfenixion/freecad.robotcad) currently serves as the primary integration platform for RoboTool.
 
 ---
 
 # 🧠 Motivation
 
-RoboTool originates from a practical limitation encountered during robotics development workflows.
+RoboTool originated from the need for a lightweight robotics toolkit capable of performing kinematic analysis directly from URDF robot descriptions.
 
-During a biorobotics course, the standard pipeline relied heavily on MATLAB and Simulink. While powerful, these environments introduced significant limitations:
+During robotics development workflows, many existing solutions required heavyweight simulation environments, proprietary software, or tightly coupled frameworks that made experimentation and debugging unnecessarily difficult.
 
-* high resource usage
-* licensing restrictions
-* export incompatibilities
-* limited integration flexibility
+RoboTool was created to provide:
 
-A complete 6-DOF robotic arm was successfully modeled and designed, including CAD geometry and kinematic analysis. However, integration into simulation environments became unreliable due to export restrictions and incompatible workflows.
+- transparent robotics mathematics
+- lightweight execution
+- reproducible numerical algorithms
+- direct access to intermediate computations
+- URDF-native workflows
 
-This motivated the exploration of URDF-native robotics pipelines.
-
-After working directly with URDF-based systems, a major gap became evident:
-
-> There is no simple, transparent, and lightweight bridge between robot modeling and executable kinematics.
-
-RoboTool was created to solve that problem.
+Instead of hiding robotics concepts behind large frameworks, RoboTool exposes every computational step.
 
 ---
 
@@ -77,15 +97,13 @@ RoboTool was created to solve that problem.
 
 RoboTool emphasizes:
 
-* Explicit robotics mathematics
-* Transparent kinematic propagation
-* Lightweight workflows
-* Reproducibility
-* Simulation interoperability
-* URDF-native robotics pipelines
-* User-controlled modeling and debugging
-
-Instead of hiding robotics concepts behind large frameworks, RoboTool exposes the mathematics directly.
+- Explicit robotics mathematics
+- Lightweight implementation
+- Numerical robustness
+- Reproducibility
+- Simulation interoperability
+- URDF-native workflows
+- Educational transparency
 
 ---
 
@@ -93,207 +111,245 @@ Instead of hiding robotics concepts behind large frameworks, RoboTool exposes th
 
 ---
 
-# 1. Forward Kinematics
-
-Unlike traditional Denavit–Hartenberg-only pipelines, RoboTool computes Forward Kinematics directly from the URDF kinematic tree.
-
-This allows:
-
-* arbitrary joint axes
-* spatial manipulators
-* non-orthogonal configurations
-* URDF-native transformations
-
-The pose of each link is propagated using homogeneous transformations.
-
 ## Homogeneous Transformation
 
-Each joint transformation is represented as:
+Each joint transformation is represented by a homogeneous transformation matrix
 
 ```math
-T = \begin{bmatrix} R & p \\ 0_{1\times3} & 1 \end{bmatrix}
+T=
+\begin{bmatrix}
+R & p\\
+0_{1\times3} & 1
+\end{bmatrix}
 ```
 
-Where:
+where
 
-* (R \in \mathbb{R}^{3\times3}) is the rotation matrix
-* (p \in \mathbb{R}^{3}) is the translation vector
+- $R\in\mathbb{R}^{3\times3}$ is the rotation matrix.
+- $p\in\mathbb{R}^{3}$ is the translation vector.
 
 ---
 
-## Joint Rotation via Rodrigues Formula
+## Rodrigues Rotation Formula
 
-To support arbitrary joint axes directly extracted from URDF definitions, RoboTool computes active joint rotations using Rodrigues’ rotation formula.
-
-```math
-R_{joint}(\theta)=I_3+\sin(\theta)K+(1-\cos(\theta))K^2
-```
-
-Where the skew-symmetric matrix (K) is defined from the unit joint axis vector:
+Joint rotations are computed using Rodrigues' rotation formula
 
 ```math
-K = \begin{bmatrix} 0 & -u_z & u_y \\ u_z & 0 & -u_x \\ -u_y & u_x & 0 \end{bmatrix}
+R(\theta)
+=
+I
++
+\sin(\theta)K
++
+(1-\cos\theta)K^2
 ```
 
-This enables:
+where
 
-* arbitrary spatial rotations
-* URDF-native axis handling
-* non-DH-compatible robots
-* general robotic topologies
+```math
+K=
+\begin{bmatrix}
+0&-u_z&u_y\\
+u_z&0&-u_x\\
+-u_y&u_x&0
+\end{bmatrix}
+```
+
+allowing arbitrary joint axes extracted directly from URDF.
 
 ---
 
-## Kinematic Chain Propagation
+## Kinematic Propagation
 
-The end-effector pose is propagated along the kinematic chain using sequential homogeneous transformations:
-
-```math
-{}^{0}T_n = \prod_{i=1}^{n} {}^{i-1}T_i(q_i)
-```
-
----
-
-# 2. Geometric Jacobian
-
-RoboTool computes the full Geometric Jacobian explicitly.
-
-The Jacobian is separated into:
-
-* linear velocity component (J_v)
-* angular velocity component (J_w)
-
----
-
-## Revolute / Continuous Joints
-
-For rotational joints:
+Forward kinematics is computed as
 
 ```math
-J_i = \begin{bmatrix} z_i \times (p_n - p_i) \\ z_i \end{bmatrix}
-```
-
-Where:
-
-* (z_i) is the joint axis expressed in the global frame
-* (p_i) is the joint position
-* (p_n) is the end-effector position
-
----
-
-## Prismatic Joints
-
-For prismatic joints:
-
-```math
-J_i = \begin{bmatrix} z_i \\ 0_{3\times1} \end{bmatrix}
+{}^{0}T_n
+=
+\prod_{i=1}^{n}
+{}^{i-1}T_i(q_i)
 ```
 
 ---
 
-## Arbitrary Joint Axis Support
+# Geometric Jacobian
 
-Unlike many simplified robotics pipelines, RoboTool directly respects arbitrary URDF joint axes:
+The geometric Jacobian is constructed explicitly.
 
-```xml
-<axis xyz="ux uy uz"/>
-```
-
-Joint axes are projected into the global frame using:
+For revolute joints
 
 ```math
-z_i = {}^{0}R_i\hat{u}_i
+J_i=
+\begin{bmatrix}
+z_i\times(p_n-p_i)\\
+z_i
+\end{bmatrix}
 ```
 
-This allows:
+For prismatic joints
 
-* arbitrary robot geometries
-* non-standard manipulators
-* spatial robot configurations
-* direct URDF compatibility
+```math
+J_i=
+\begin{bmatrix}
+z_i\\
+0_{3\times1}
+\end{bmatrix}
+```
+
+Joint axes are projected into the global frame
+
+```math
+z_i
+=
+{}^{0}R_i\hat{u}_i
+```
+
+allowing arbitrary URDF joint orientations.
 
 ---
 
-# 3. Numerical Jacobian Validation
+# Numerical Jacobian Validation
 
-Analytical Jacobians are internally validated using finite-difference numerical derivatives.
+Analytical Jacobians are validated through finite differences, applied independently to the linear and angular blocks of the Jacobian.
 
-Linear velocity validation:
+**Linear block** (end-effector position with respect to joint $i$):
 
 ```math
-J_{v_i} \approx \frac{p(q+\delta q_i)-p(q)}{\delta q_i}
+J_{v_i}
+\approx
+\frac{
+p(q+\delta q_i)-p(q)
+}{
+\delta q_i
+}
 ```
 
-Typical numerical accuracy:
+**Angular block** (end-effector orientation with respect to joint $i$), using the first-order rotation vector approximation obtained from the relative rotation matrix between the perturbed and nominal configurations:
+
+```math
+J_{\omega_i}
+\approx
+\frac{
+\phi\!\left(R(q)^TR(q+\delta q_i)\right)
+}{
+\delta q_i
+}
+```
+
+where $\phi(\cdot)$ denotes the axis-angle rotation vector extracted from a relative rotation matrix using its skew-symmetric part, providing a first-order approximation of the angular velocity in $\mathbb{R}^3$.
+
+Typical validation accuracy
 
 ```text
-Max Jv error: 1e-7
-Max Jw error: 1e-13
-```
-
-This validation guarantees consistency between:
-
-* analytical Jacobians
-* FK propagation
-* differential motion behavior
-
----
-
-# 4. Iterative Inverse Kinematics
-
-RoboTool solves Inverse Kinematics numerically using Jacobian pseudo-inverse optimization.
-
----
-
-## Cartesian Error
-
-The workspace error is defined as:
-
-```math
-e = x_d - x_{actual}
-```
-
-Where:
-
-* (x_d) is the desired target position
-* (x_{actual}) is the current end-effector position
-
----
-
-## Jacobian Pseudo-Inverse Solver
-
-The joint-space correction is computed using:
-
-```math
-\Delta q = J^+ e
-```
-
-Where the Moore–Penrose pseudo-inverse is:
-
-```math
-J^+ = J^T(JJ^T)^{-1}
+Linear Jacobian error  : ~1e-7
+Angular Jacobian error : ~1e-13
 ```
 
 ---
 
-## Stability Constraints
+# Inverse Kinematics
 
-To improve convergence stability near singularities and unreachable targets, RoboTool includes:
+RoboTool solves inverse kinematics using an iterative Adaptive Damped Least Squares algorithm, supporting both position-only and full 6-DOF pose targets.
 
-* step-size limiting
-* angular normalization
-* convergence thresholds
-* unreachable workspace handling
-
-Joint updates follow:
+**Position-only error**
 
 ```math
-q_{new}=q_{current}+\alpha\Delta q
+e_p
+=
+x_d-x
+\in\mathbb{R}^3
 ```
 
-Where:
+**Pose error (position + orientation)**, when an orientation target is provided:
 
-* (\alpha) is the damping / learning factor
+```math
+e
+=
+\begin{bmatrix}
+e_p\\
+e_o
+\end{bmatrix}
+\in\mathbb{R}^6,
+\qquad
+e_o=\phi(R_dR^T)
+```
+
+where
+
+- $e_p\in\mathbb{R}^3$ is the Cartesian position error.
+- $e_o\in\mathbb{R}^3$ is the orientation error represented as an axis-angle rotation vector.
+- $R_d$ is the desired end-effector orientation.
+- $R$ is the current end-effector orientation.
+- $x_d\in\mathbb{R}^3$ is the desired end-effector position.
+- $x\in\mathbb{R}^3$ is the current end-effector position.
+
+When no orientation target is provided, the solver falls back to the position-only formulation and uses only the linear block of the Jacobian.
+
+---
+
+## Adaptive Damped Least Squares
+
+The inverse kinematics solver is based on a Damped Least Squares formulation computed through the Singular Value Decomposition (SVD).
+
+```math
+J
+=
+U\Sigma V^T
+```
+
+The joint update is computed as
+
+```math
+\Delta q
+=
+V
+\,
+\mathrm{diag}
+\left(
+\frac{\sigma_i}
+{\sigma_i^2+\lambda^2}
+\right)
+U^Te
+```
+
+where
+
+- $\sigma_i$ are the singular values of the Jacobian matrix.
+- $\lambda$ is the adaptive damping coefficient, adjusted according to the Jacobian condition number.
+- $e$ is either the position error $e_p$ or the full pose error $[e_p;\,e_o]$, depending on whether an orientation target is provided.
+
+The damping coefficient increases automatically as the Jacobian becomes ill-conditioned, improving numerical stability near singular configurations.
+
+---
+
+## Manipulability Analysis
+
+To detect singular configurations, RoboTool computes the Yoshikawa manipulability index using the **linear component** of the geometric Jacobian:
+
+```math
+w
+=
+\sqrt{
+\det(J_vJ_v^T)
+}
+```
+
+Configurations with very low manipulability trigger an automatic singularity escape procedure before optimization continues.
+
+---
+
+## Numerical Stability
+
+The solver includes several stabilization mechanisms:
+
+- Adaptive DLS damping
+- Adaptive step-size limiting
+- Manipulability analysis
+- Automatic singularity escape
+- Stall detection
+- Convergence thresholds
+- Optional joint wrapping
+- Workspace validation
 
 ---
 
@@ -301,12 +357,23 @@ Where:
 
 ```text
 URDF
- └── Parser
-      └── Kinematic Graph
-           ├── Forward Kinematics
-           ├── Jacobian Engine
-           ├── Numerical Validation
-           └── Iterative IK Solver
+   │
+   ▼
+Robot Model
+   │
+   ▼
+Forward Kinematics
+   │
+   ▼
+Geometric Jacobian
+   │
+   ├──────────────► Numerical Validation
+   │
+   ▼
+Adaptive DLS IK
+   │
+   ▼
+Joint Configuration
 ```
 
 ---
@@ -326,79 +393,47 @@ robotool/
 
 ---
 
-# 🚀 CLI Usage
+# 🚀 CLI
 
----
-
-# Forward Kinematics
+Forward Kinematics
 
 ```bash
-python3 cli.py Robot_orbitador.urdf
+python3 cli.py robot.urdf
 ```
 
-Outputs:
-
-* end-effector transformation matrix
-* geometric Jacobian
-* numerical validation metrics
-
----
-
-# Inverse Kinematics
+Inverse Kinematics (position only)
 
 ```bash
-python3 cli.py Robot_orbitador.urdf --target 0.345 0.09 0.395
+python3 cli.py robot.urdf --target X Y Z
 ```
 
-Example output:
+Inverse Kinematics (position + orientation)
 
-```text
-Converged in 7 iterations.
-
-Inverse Kinematics Result:
-[-0.1676  0.7957  0.3645 -0.0117 -0.3493  0.    ]
-
-Target:         [0.345 0.09  0.395]
-Achieved:       [0.345 0.09  0.395]
-
-Position error: 0.000000 m
+```bash
+python3 cli.py robot.urdf --target X Y Z --target-rpy ROLL PITCH YAW
 ```
+
+> `--target-rpy` requires `--target` and expects roll, pitch, and yaw in radians.
 
 ---
 
-# 🧪 Experimental Robot Models
+# 🧪 Validation
 
-Several URDF models intentionally contain constrained or imperfect kinematic definitions in order to stress-test:
+The project contains multiple experimental URDF models intentionally designed to stress-test
 
-* singular configurations
-* malformed kinematic chains
-* degenerate Jacobians
-* unreachable targets
-* limited workspaces
-* constrained rotational axes
-
-This allows RoboTool to validate robustness beyond idealized manipulators.
-
----
-
-# 🔬 Numerical Validation
-
-Analytical Jacobians are validated against numerical finite-difference derivatives.
-
-Typical validation accuracy:
-
-```text
-Max Jv error: 1e-7
-Max Jw error: 1e-13
-```
+- Singular configurations
+- Unreachable targets
+- Malformed kinematic chains
+- Constrained workspaces
+- Arbitrary joint axes
 
 ---
 
 # 📦 Installation
 
 ```bash
-git clone https://github.com/u4456163-wq/RobotTOOL
-cd robotool
+git clone https://github.com/u4456163-wq/RoboTool.git
+cd RoboTool
 pip install -r requirements.txt
 ```
 
@@ -406,60 +441,58 @@ pip install -r requirements.txt
 
 # 🛣️ Roadmap
 
-* [x] URDF Parsing
-* [x] Forward Kinematics
-* [x] Geometric Jacobians
-* [x] Numerical Jacobian Validation
-* [x] Iterative Inverse Kinematics
+## Implemented
 
-## Planned Features
+- ✅ URDF Parsing
+- ✅ Forward Kinematics
+- ✅ Geometric Jacobians
+- ✅ Numerical Jacobian Validation
+- ✅ Adaptive Damped Least Squares IK
+- ✅ Orientation-aware IK
+- ✅ Manipulability Analysis
+- ✅ Singularity Escape
+- ✅ Adaptive Step Limiting
 
-* [ ] Damped Least Squares IK
-* [ ] Orientation-aware IK
-* [ ] Null-space optimization
-* [ ] Collision-aware IK
-* [ ] Dynamics engine
-* [ ] Trajectory generation
-* [ ] URDF tree support
-* [ ] ROS2 bridge
-* [ ] Visualization backend
+## Planned
+
+- Joint limits
+- Null-space optimization
+- Collision-aware IK
+- Trajectory generation
+- Dynamics engine
+- Tree-structured IK
+- ROS2 bridge
+- Visualization backend
 
 ---
 
 # 🧩 Design Philosophy
 
-RoboTool is built around a simple principle:
+RoboTool follows a simple principle:
 
-> Robotics tools should expose the mathematics, not hide them.
+> **Robotics software should expose the mathematics, not hide them.**
 
-The engine prioritizes:
+The library favors transparency over abstraction by making every stage of the kinematic computation accessible, inspectable, and reproducible.
 
-* transparency
-* explicit kinematic modeling
-* reproducibility
-* lightweight robotics workflows
-* interoperability with custom robotics pipelines
+Rather than hiding robotics behind heavyweight frameworks, RoboTool exposes
 
-Rather than abstracting robotics behind heavyweight frameworks, RoboTool exposes:
+- Homogeneous transformations
+- Geometric Jacobians
+- Manipulability analysis
+- Numerical inverse kinematics
+- Differential robot motion
 
-* transformations
-* Jacobians
-* kinematic propagation
-* numerical IK behavior
-* workspace dynamics
-
-Directly to the user.
+allowing users to understand and control every computation.
 
 ---
 
 # 🤝 Credits
 
-Inspired by:
+Inspired by
 
-* URDF-based robotics workflows
-* geometric robotics
-* differential kinematics
-* modern robotics pipelines
-* robotics simulation toolchains
-
-Built as part of the RoboTool / RobotCAD ecosystem.
+- URDF robotics workflows
+- Geometric robotics
+- Differential kinematics
+- Numerical optimization
+- Modern Robotics (Lynch & Park)
+- RobotCAD
