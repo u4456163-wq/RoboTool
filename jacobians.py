@@ -1,72 +1,99 @@
 import numpy as np
-from models import Robot
-from kinematics import compute_forward_kinematics_full
+from .models import Robot
+from .kinematics import compute_forward_kinematics_full, joint_to_matrix
 
-def compute_jacobian(robot: Robot, q: np.ndarray) -> np.ndarray:
+def compute_jacobian(robot: Robot, joint_positions: np.ndarray) -> np.ndarray:
     """
-    Calculates the Jacobian matrix 6xN for the given robot configuration.
+    Computes the standard 6xN analytical/geometric Jacobian matrix for the manipulator.
+
+    Parameters:
+    -----------
+    robot : Robot
+        The structural robot data model.
+    joint_positions : np.ndarray
+        Vector containing the current active joint positions.
+    Returns:
+    --------
+    np.ndarray
+        The computed 6xN geometric Jacobian matrix.
     """
-    active_joints = [j for j in robot.joints if j.joint_type != "fixed"]
-    n_active = len(active_joints)
-    J = np.zeros((6, n_active))
+    active_joints = [joint for joint in robot.joints if joint.joint_type != "fixed"]
+    total_active_joints = len(active_joints)
+    jacobian_matrix = np.zeros((6, total_active_joints))
 
-    all_transforms = compute_forward_kinematics_full(robot, q)
-    T_0_n = all_transforms[-1]
-    p_n = all_transforms[-1][:3, 3]  # Position of the end effector in global space
+    all_transforms = compute_forward_kinematics_full(robot, joint_positions)
+    end_effector_position = all_transforms[-1][:3, 3]
 
-    col = 0 # Column active for the Jacobian
-
-    # 1. Obtain the global transformation of the end effector(T_0_n)
-    # 2. For each joint i from 1 to n:
-    #    - Calculate the transformation from the base to the joint i (T_0_i) 
-    #    - Extract the rotation/traslation axis (Z_i) 
-    #    - Calculate the position vector of the end effector relative to joint i (p_n - p_i)
-    
+    current_column = 0
     for i, joint in enumerate(robot.joints):
         if joint.joint_type == "fixed":
             continue
-            
-        T_0_i = all_transforms[i+1]  # T_0_i is the transformation up to joint i (i+1 in the list)
-        p_i = T_0_i[:3, 3]
-        R_0_i = T_0_i[:3, :3]
-        
-        # Project the joint axis specified in the URDF to the global frame
-        axis_local = np.array(joint.axis) / np.linalg.norm(joint.axis)
-        z_i = R_0_i @ axis_local  # <--- THIS ensures it works for any axle
+
+        # Frame of the parent link (before the URDF offset of this joint)
+        T_parent = all_transforms[i]  # all_transforms[0] is base, [1] is after joint 0, etc.
+        # Fixed URDF transform for this joint
+        T_urdf = joint_to_matrix(joint)
+        # Frame of the joint BEFORE the motion (includes fixed offset, excludes q[i])
+        T_frame_articulation = T_parent @ T_urdf
+        position_frame_articulation = T_frame_articulation[:3, 3]
+        rotation_frame_articulation = T_frame_articulation[:3, :3]
+        axis_joint_local = np.array(joint.axis) / np.linalg.norm(joint.axis)
+        axis_z_transformed = rotation_frame_articulation @ axis_joint_local
 
         if joint.joint_type in ["revolute", "continuous"]:
-            r = p_n - p_i
-            J[:3, col] = np.cross(z_i, r)  # Jv
-            J[3:, col] = z_i               # Jw 
-
+            vector_difference_position = end_effector_position - position_frame_articulation
+            jacobian_matrix[:3, current_column] = np.cross(axis_z_transformed, vector_difference_position)
+            jacobian_matrix[3:, current_column] = axis_z_transformed
         elif joint.joint_type == "prismatic":
-            J[:3,col] = z_i #jv
-            J[3:,col] = np.zeros(3) #jw
-        else:
-            continue
+            jacobian_matrix[:3, current_column] = axis_z_transformed
+            jacobian_matrix[3:, current_column] = np.zeros(3)
 
-        col += 1
+        current_column += 1
 
-    return J
-def validate_jacobian_numerically(robot, q, eps=1e-6):
-    """Finite difference check against analytic Jacobian."""
-    J_analytic = compute_jacobian(robot, q)
-    n = J_analytic.shape[1]
-    J_numeric = np.zeros((6, n))
+    return jacobian_matrix
 
-    T0 = compute_forward_kinematics_full(robot, q)[-1]
-    p0 = T0[:3, 3]
-    R0 = T0[:3, :3]
+def validate_jacobian_numerically(robot: Robot, joint_positions: np.ndarray, epsilon: float = 1e-6) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Validates the analytic geometric Jacobian matrix against a finite differences matrix approximation.
 
-    for i in range(n):
-        dq = q.copy()
-        dq[i] += eps
-        T1 = compute_forward_kinematics_full(robot, dq)[-1]
-        p1 = T1[:3, 3]
-        R1 = T1[:3, :3]
-        J_numeric[:3, i] = (p1 - p0) / eps  # Velocity part from linear difference
-        dR = R1 @ R0.T
-        # Extract the angular velocity from the rotation difference using the logarithm map
-        J_numeric[3:,i] = np.array([dR[2,1]-dR[1,2], dR[0,2]-dR[2,0], dR[1,0]-dR[0,1]]) / (2 * eps)
+    Parameters:
+    -----------
+    robot : Robot
+        The structural robot data model.
+    joint_positions : np.ndarray
+        Vector of the configuration state to perform the evaluation.
+    epsilon : float, optional
+        The scalar delta step size for central/forward difference calculation (default is 1e-6).
+    Returns:
+    --------
+    tuple[np.ndarray, np.ndarray]
+        A tuple containing (jacobian_analytic, jacobian_numeric) for structural evaluation.
+    """
+    jacobian_analytic = compute_jacobian(robot, joint_positions)
+    total_active_joints = jacobian_analytic.shape[1]
+    jacobian_numeric = np.zeros((6, total_active_joints))
 
-    return J_analytic, J_numeric
+    initial_transform = compute_forward_kinematics_full(robot, joint_positions)[-1]
+    initial_position = initial_transform[:3, 3]
+    initial_rotation = initial_transform[:3, :3]
+
+    for i in range(total_active_joints):
+        perturbed_positions = joint_positions.copy()
+        perturbed_positions[i] += epsilon
+        
+        perturbed_transform = compute_forward_kinematics_full(robot, perturbed_positions)[-1]
+        perturbed_position = perturbed_transform[:3, 3]
+        perturbed_rotation = perturbed_transform[:3, :3]
+        
+        # Calculate linear velocity component via positional difference
+        jacobian_numeric[:3, i] = (perturbed_position - initial_position) / epsilon  
+        
+        # Extract angular velocity component from the rotation difference matrix
+        rotation_difference = perturbed_rotation @ initial_rotation.T
+        jacobian_numeric[3:, i] = np.array([
+            rotation_difference[2, 1] - rotation_difference[1, 2], 
+            rotation_difference[0, 2] - rotation_difference[2, 0], 
+            rotation_difference[1, 0] - rotation_difference[0, 1]
+        ]) / (2 * epsilon)
+
+    return jacobian_analytic, jacobian_numeric
